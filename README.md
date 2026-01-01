@@ -6,7 +6,7 @@ Installer and deployment helper for the **backlight-linux** GUI that controls th
 
 | Path | Purpose |
 | --- | --- |
-| `source/` | Upstream scripts (GUI, restore helper, power monitor) and the `assets/` data copied into `/usr/share/xmg-backlight` by the installer. |
+| `source/` | Upstream scripts (GUI, restore helper, power monitor). |
 | `install.py` | Top-level installer script to run with sudo. |
 | `.gitignore` | Local development exclusions (bytecode, build artifacts, IDE files, etc.). |
 
@@ -32,7 +32,7 @@ Installer and deployment helper for the **backlight-linux** GUI that controls th
 
 The installer performs these actions:
 * Ensures `ite8291r3-ctl` and `PySide6` are installed via `pip`.
-* Copies the GUI scripts (`keyboard_backlight.py`, `restore_profile.py`, `power_state_monitor.py`) and assets to `/usr/share/xmg-backlight`.
+* Copies the GUI scripts (`keyboard_backlight.py`, `restore_profile.py`, `power_state_monitor.py`) into `/usr/share/xmg-backlight`.
 * Creates a launcher wrapper at `/usr/local/bin/xmg-backlight` and a desktop entry under `/usr/share/applications`.
 * Installs `/etc/systemd/system-sleep/xmg-backlight-restore` and a helper `/usr/local/lib/xmg-backlight-resume-hook.sh`.
 * Adds drop-ins for `systemd-suspend*` services so the resume hook runs automatically, then reloads `systemd`.
@@ -62,7 +62,7 @@ If the keyboard stays dark but manual restore works (`python3 /usr/share/xmg-bac
 ## Credits
 
 This installer/GUI bundle builds on top of the excellent [`pobrn/ite8291r3-ctl`](https://github.com/pobrn/ite8291r3-ctl) userspace driver.  
-- **Driver, low-level tooling & `assets/` data:** © [Barnabás Pőcze](https://github.com/pobrn) and contributors (GPL licensed).  
+- **Driver & low-level tooling:** © [Barnabás Pőcze](https://github.com/pobrn) and contributors (GPL licensed).  
 - **GUI + automatic installer:** developed by @Darayavaush-84 to provide a PySide-based interface, user services, and system-level hooks that simplify deployments on XMG/Tongfang laptops.
 
 ## License

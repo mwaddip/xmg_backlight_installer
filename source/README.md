@@ -55,8 +55,6 @@ The simplest way to install is to use `pip`:
 pip install ite8291r3-ctl
 ```
 
-*Note:* This will not download anything from the `assets` directory, it only installs the program. You will have to download them manually if you want to try them out.
-
 *Note:* If you want to install for all users, run `pip` as root.
 
 ## Manually
@@ -231,7 +229,7 @@ ite8291r3-ctl mode --screen 1000,1000,200,300
 
 ___
 ### anim
-Plays an animation from a file. The name might be a bit misleading, because this is actually the facility of the program that allows you to set the color values on a per key basis. Read the README file in `assets/animatins` to see how animations may be made. It is a bit cumbersome, I am aware, however, a better way has yet to be found. The animation may be read from the standard input, so you can programatically generate it.
+Plays an animation from a file. The name might be a bit misleading, because this is actually the facility of the program that allows you to set the color values on a per key basis. Refer to the upstream project (<https://github.com/pobrn/ite8291r3-ctl/tree/master/assets/animations>) for documentation and sample animation files. The animation may be read from the standard input, so you can programatically generate it.
 
 *Example:*
 ```

@@ -46,7 +46,7 @@ FILES_TO_DEPLOY = [
     "restore_profile.py",
     "power_state_monitor.py",
 ]
-DIRS_TO_DEPLOY = ["assets"]
+DIRS_TO_DEPLOY: list[str] = []
 
 
 class InstallerError(RuntimeError):
