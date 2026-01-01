@@ -6,7 +6,7 @@ Installer and deployment helper for the **backlight-linux** GUI that controls th
 
 | Path | Purpose |
 | --- | --- |
-| `source/` | Upstream scripts (GUI, restore helper, power monitor, assets, license) copied into `/usr/share/xmg-backlight` by the installer. |
+| `source/` | Upstream scripts (GUI, restore helper, power monitor) and the `assets/` data copied into `/usr/share/xmg-backlight` by the installer. |
 | `installer/` | The `install.py` script plus any helper assets required only during installation. |
 | `.gitignore` | Local development exclusions (bytecode, build artifacts, IDE files, etc.). |
 
@@ -62,9 +62,12 @@ If the keyboard stays dark but manual restore works (`python3 /usr/share/xmg-bac
 ## Credits
 
 This installer/GUI bundle builds on top of the excellent [`pobrn/ite8291r3-ctl`](https://github.com/pobrn/ite8291r3-ctl) userspace driver.  
-- **Driver & low-level tooling:** © [Barnabás Pőcze](https://github.com/pobrn) and contributors (GPL licensed).  
+- **Driver, low-level tooling & `assets/` data:** © [Barnabás Pőcze](https://github.com/pobrn) and contributors (GPL licensed).  
 - **GUI + automatic installer:** developed by @Darayavaush-84 to provide a PySide-based interface, user services, and system-level hooks that simplify deployments on XMG/Tongfang laptops.
 
 ## License
 
-This project is distributed under the **GNU General Public License v3.0**. See [`source/LICENSE`](source/LICENSE) for the full text. Contributions must also be licensed under GPL-3.0 to remain compatible.
+* **GUI + installer code** (authored by **Dario Barbarino**): released under the **GNU General Public License v3.0**.  
+* **Underlying driver (`ite8291r3-ctl`)**: distributed under **GNU GPL v2.0** per the upstream project. Its license text is stored in [`source/LICENSE`](source/LICENSE).
+
+When contributing, keep your changes compatible with GPL v3 for the GUI/installer and respect the upstream GPL v2 requirements for the driver portion.
