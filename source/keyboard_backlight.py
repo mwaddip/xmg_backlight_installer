@@ -8,8 +8,10 @@ import stat
 import subprocess
 import sys
 import time
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtWidgets, QtGui
 
+APP_DISPLAY_NAME = "XMG Backlight Management"
+NOTIFICATION_TIMEOUT_MS = 2200
 TOOL_ENV_VAR = "ITE8291R3_CTL"
 TOOL_CANDIDATES = [
     os.environ.get(TOOL_ENV_VAR),
@@ -56,6 +58,7 @@ DIRECTIONS = ["none", "right", "left", "up", "down"]
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "backlight-linux")
 PROFILE_PATH = os.path.join(CONFIG_DIR, "profile.json")
+SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
 RESTORE_SCRIPT = os.path.join(BASE_DIR, "restore_profile.py")
 POWER_MONITOR_SCRIPT = os.path.join(BASE_DIR, "power_state_monitor.py")
 AUTOSTART_DIR = os.path.join(os.path.expanduser("~"), ".config", "autostart")
@@ -80,6 +83,10 @@ DEFAULT_PROFILE_STATE = {
     "direction": "none",
     "reactive": False,
 }
+DEFAULT_SETTINGS = {
+    "start_in_tray": False,
+    "show_notifications": True,
+}
 
 
 def clamp_int(value, minimum, maximum, fallback):
@@ -92,6 +99,39 @@ def clamp_int(value, minimum, maximum, fallback):
 
 def ensure_config_dir():
     os.makedirs(CONFIG_DIR, exist_ok=True)
+
+
+def read_settings_file():
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def write_settings_file(data):
+    ensure_config_dir()
+    tmp_path = SETTINGS_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+    os.replace(tmp_path, SETTINGS_PATH)
+
+
+def sanitize_settings(data):
+    base = dict(DEFAULT_SETTINGS)
+    if not isinstance(data, dict):
+        return base
+    base["start_in_tray"] = bool(data.get("start_in_tray", base["start_in_tray"]))
+    base["show_notifications"] = bool(
+        data.get("show_notifications", base["show_notifications"])
+    )
+    return base
+
+
+def load_settings():
+    raw = read_settings_file()
+    return sanitize_settings(raw)
 
 
 def read_profile_file():
@@ -487,13 +527,20 @@ def apply_effect_with_fallback(args, runner=run_cmd):
 
 
 class Main(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, *, enable_tray=True):
         super().__init__()
-        self.setWindowTitle("XMG Backlight Management")
+        self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(720, 520)
 
         QtWidgets.QApplication.setStyle("Fusion")
+        QtWidgets.QApplication.setQuitOnLastWindowClosed(False)
+        base_icon = QtGui.QIcon.fromTheme("input-keyboard")
+        if base_icon.isNull():
+            base_icon = self.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon)
+        self.setWindowIcon(base_icon)
 
+        self.settings = load_settings()
+        self.tray_supported = QtWidgets.QSystemTrayIcon.isSystemTrayAvailable()
         self.is_off = False
         self.last_brightness = 40
         self.last_static_color = "white"
@@ -720,6 +767,23 @@ class Main(QtWidgets.QWidget):
             selectable=True,
         )
 
+        settings_row = QtWidgets.QWidget()
+        settings_layout = QtWidgets.QHBoxLayout(settings_row)
+        settings_layout.setContentsMargins(0, 8, 0, 0)
+        settings_layout.addStretch(1)
+        self.start_in_tray_checkbox = QtWidgets.QCheckBox("Add in systray")
+        self.start_in_tray_checkbox.setChecked(self.settings.get("start_in_tray", False))
+        if not self.tray_supported:
+            self.start_in_tray_checkbox.setEnabled(False)
+            self.start_in_tray_checkbox.setToolTip(
+                "System tray not available in this session."
+            )
+        settings_layout.addWidget(self.start_in_tray_checkbox)
+        self.notifications_checkbox = QtWidgets.QCheckBox("Show notifications")
+        self.notifications_checkbox.setChecked(self.settings.get("show_notifications", True))
+        settings_layout.addWidget(self.notifications_checkbox)
+        hl.addWidget(settings_row)
+
         root.addWidget(helper_box)
 
         self.apply_timer = QtCore.QTimer(self)
@@ -764,6 +828,8 @@ class Main(QtWidgets.QWidget):
         self.autostart_flag.stateChanged.connect(self.on_autostart_flag_changed)
         self.resume_flag.stateChanged.connect(self.on_resume_flag_changed)
         self.power_monitor_flag.stateChanged.connect(self.on_power_monitor_flag_changed)
+        self.start_in_tray_checkbox.toggled.connect(self.on_start_in_tray_toggled)
+        self.notifications_checkbox.toggled.connect(self.on_notifications_toggled)
         self.refresh_autostart_flag()
         self.refresh_resume_controls()
         self.refresh_power_monitor_controls()
@@ -771,6 +837,11 @@ class Main(QtWidgets.QWidget):
 
         if self.profile_data:
             self.restore_profile_after_startup()
+
+        self.tray_icon = None
+        self._tray_close_hint_shown = False
+        self._quitting = False
+        self.setup_tray_icon(enable_tray=enable_tray)
 
     def log(self, text, level="info"):
         timestamp = time.strftime("%H:%M:%S")
@@ -780,12 +851,127 @@ class Main(QtWidgets.QWidget):
         if sb:
             sb.setValue(sb.maximum())
 
+    def save_settings(self):
+        try:
+            write_settings_file(self.settings)
+        except OSError as exc:
+            self.log(f"Failed to save settings: {exc}", level="error")
+
+    def notify(self, title, message, *, icon=QtWidgets.QSystemTrayIcon.Information):
+        if not self.settings.get("show_notifications", True):
+            return
+        if self.tray_icon and self.tray_icon.isSystemTrayAvailable():
+            self.tray_icon.showMessage(title, message, icon, NOTIFICATION_TIMEOUT_MS)
+
+    def setup_tray_icon(self, enable_tray=True):
+        if not enable_tray:
+            return
+        if not self.tray_supported:
+            return
+        if self.tray_icon is None:
+            self.tray_icon = QtWidgets.QSystemTrayIcon(self.windowIcon(), self)
+            menu = QtWidgets.QMenu(self)
+            show_action = menu.addAction("Show window")
+            show_action.triggered.connect(self.show_window_from_tray)
+            menu.addSeparator()
+            turn_on_action = menu.addAction("Turn on")
+            turn_on_action.triggered.connect(self.on_tray_turn_on)
+            turn_off_action = menu.addAction("Turn off")
+            turn_off_action.triggered.connect(self.on_tray_turn_off)
+            load_profile_action = menu.addAction("Load last profile")
+            load_profile_action.triggered.connect(self.on_tray_load_last_profile)
+            menu.addSeparator()
+            quit_action = menu.addAction("Quit")
+            quit_action.triggered.connect(self.on_tray_quit)
+            self.tray_icon.setContextMenu(menu)
+            self.tray_icon.activated.connect(self.on_tray_activated)
+        if self.tray_icon:
+            self.tray_icon.show()
+        if self.settings.get("start_in_tray", False) and self.tray_icon:
+            self.hide()
+            self.notify(APP_DISPLAY_NAME, "Minimized to tray.")
+
     def on_log_toggle_toggled(self, checked):
         if not hasattr(self, "console_box"):
             return
         self.console_box.setVisible(checked)
         if hasattr(self, "log_toggle_button"):
             self.log_toggle_button.setText("Hide log" if checked else "Show log")
+
+    def show_window_from_tray(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def on_tray_turn_on(self):
+        self.on_power_on()
+        self.notify(APP_DISPLAY_NAME, "Backlight turned on.")
+
+    def on_tray_turn_off(self):
+        self.on_power_off()
+        self.notify(APP_DISPLAY_NAME, "Backlight turned off.")
+
+    def on_tray_load_last_profile(self):
+        self.restore_profile_after_startup()
+        self.notify(APP_DISPLAY_NAME, f"Profile '{self.active_profile_name}' applied.")
+
+    def on_tray_quit(self):
+        self._quitting = True
+        if self.tray_icon:
+            self.tray_icon.hide()
+        QtWidgets.QApplication.instance().quit()
+
+    def on_tray_activated(self, reason):
+        if reason in (
+            QtWidgets.QSystemTrayIcon.Trigger,
+            QtWidgets.QSystemTrayIcon.DoubleClick,
+        ):
+            if self.isHidden():
+                self.show_window_from_tray()
+            else:
+                self.hide()
+
+    def closeEvent(self, event):
+        if self._quitting:
+            return super().closeEvent(event)
+        if (
+            self.settings.get("start_in_tray", False)
+            and self.tray_icon
+            and self.tray_supported
+        ):
+            event.ignore()
+            self.hide()
+            if not self._tray_close_hint_shown:
+                self.notify(APP_DISPLAY_NAME, "Still running in tray. Quit from tray menu.")
+                self._tray_close_hint_shown = True
+            return
+        return super().closeEvent(event)
+
+    def on_start_in_tray_toggled(self, checked):
+        checked = bool(checked)
+        if not self.tray_supported:
+            blocker = QtCore.QSignalBlocker(self.start_in_tray_checkbox)
+            self.start_in_tray_checkbox.setChecked(False)
+            del blocker
+            return
+        if self.settings.get("start_in_tray") == checked:
+            return
+        self.settings["start_in_tray"] = checked
+        self.save_settings()
+        if checked:
+            self.setup_tray_icon(enable_tray=True)
+            if self.tray_icon:
+                self.hide()
+                self.notify(APP_DISPLAY_NAME, "Minimized to tray.")
+        else:
+            self.show_window_from_tray()
+
+    def on_notifications_toggled(self, checked):
+        checked = bool(checked)
+        if self.settings.get("show_notifications") == checked:
+            return
+        self.settings["show_notifications"] = checked
+        self.save_settings()
 
     def set_status(self, t, level="info"):
         self.log(t, level=level)

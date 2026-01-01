@@ -9,6 +9,7 @@ with sudo/root privileges.
 
 from __future__ import annotations
 
+import filecmp
 import os
 import shutil
 import stat
@@ -47,6 +48,7 @@ FILES_TO_DEPLOY = [
     "power_state_monitor.py",
 ]
 DIRS_TO_DEPLOY: list[str] = []
+DRIVER_INSTALLED_THIS_RUN = False
 
 
 class InstallerError(RuntimeError):
@@ -102,9 +104,12 @@ def describe_component(component: str, state: str, action: str) -> None:
     log(message)
 
 
-def install_pip_package(package: str) -> None:
+def install_pip_package(package: str) -> bool:
     log(f"Installing/upgrading pip package: {package}")
-    run([sys.executable, "-m", "pip", "install", "--upgrade", package])
+    rc, _, _ = run([sys.executable, "-m", "pip", "install", "--upgrade", package], check=False)
+    if rc != 0:
+        raise InstallerError(f"Failed to install pip package {package} (exit code {rc}).")
+    return True
 
 
 def detect_driver() -> None:
@@ -128,7 +133,39 @@ def detect_driver() -> None:
             "not detected",
             "pip install will install it now",
         )
-    install_pip_package(DRIVER_PACKAGE)
+    if install_pip_package(DRIVER_PACKAGE):
+        global DRIVER_INSTALLED_THIS_RUN
+        DRIVER_INSTALLED_THIS_RUN = True
+
+
+def probe_keyboard_hardware() -> None:
+    cli_path = shutil.which("ite8291r3-ctl")
+    if not cli_path:
+        log("Hardware probe skipped: ite8291r3-ctl binary not found in PATH.")
+        return
+    log("Checking for compatible keyboards...")
+    rc, stdout, stderr = run([cli_path, "query", "--devices"], check=False)
+    if rc != 0:
+        log(
+            "Warning: unable to query devices (ite8291r3-ctl exited with a non-zero status). "
+            "Continuing installation."
+        )
+        if stderr:
+            log(f"ite8291r3-ctl stderr: {stderr}")
+        return
+    devices = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if devices:
+        log(f"Detected {len(devices)} compatible keyboard device(s).")
+        return
+    answer = input(
+        "No supported keyboard was detected. Continue installation anyway? [y/N]: "
+    ).strip()
+    if answer.lower() not in ("y", "yes"):
+        if DRIVER_INSTALLED_THIS_RUN:
+            log("Removing ite8291r3-ctl because installation was aborted.")
+            run([sys.executable, "-m", "pip", "uninstall", "-y", DRIVER_PACKAGE], check=False)
+        raise InstallerError("Installation aborted: no compatible keyboard detected.")
+    log("User opted to continue without a detected keyboard.")
 
 
 def detect_gui_installation() -> None:
@@ -197,9 +234,20 @@ def deploy_files() -> None:
         dst = SHARE_DIR / relative
         if not src.is_file():
             raise InstallerError(f"Missing source file: {src}")
-        shutil.copy2(src, dst)
+        copy_needed = True
+        if dst.exists():
+            try:
+                if filecmp.cmp(src, dst, shallow=False):
+                    copy_needed = False
+                    log(f"Unchanged file detected, keeping existing {dst}")
+                else:
+                    log(f"Updating {dst} (content differs)")
+            except OSError as exc:
+                log(f"Could not compare {src} and {dst}: {exc}. Forcing copy.")
+        if copy_needed:
+            shutil.copy2(src, dst)
+            log(f"Copied {src} -> {dst}")
         mark_executable(dst)
-        log(f"Copied {src} -> {dst}")
     for relative in DIRS_TO_DEPLOY:
         src_dir = SOURCE_DIR / relative
         dst_dir = SHARE_DIR / relative
@@ -348,6 +396,7 @@ def main() -> None:
     log(FEDORA_NOTICE)
     require_root()
     detect_driver()
+    probe_keyboard_hardware()
     ensure_runtime_dependency()
     detect_gui_installation()
     deploy_files()

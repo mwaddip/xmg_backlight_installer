@@ -36,6 +36,16 @@ The installer performs these actions:
 * Creates a launcher wrapper at `/usr/local/bin/xmg-backlight` and a desktop entry under `/usr/share/applications`.
 * Installs `/etc/systemd/system-sleep/xmg-backlight-restore` and a helper `/usr/local/lib/xmg-backlight-resume-hook.sh`.
 * Adds drop-ins for `systemd-suspend*` services so the resume hook runs automatically, then reloads `systemd`.
+* Probes for compatible ITE 8291 keyboards; if none are found you can abort safely and the just-installed driver will be removed automatically.
+
+## System tray & notifications
+
+The GUI now exposes two user-facing preferences (stored under `~/.config/backlight-linux/settings.json`):
+
+- **Add in systray** – start the application minimized to the system tray and keep it running even when the window is closed. A tray icon provides quick actions (Show/Hide window, Turn on/off, Load last profile, Quit).
+- **Show notifications** – toggle desktop toasts emitted by the tray commands (short messages such as “Minimized to tray”).
+
+Both options live in the “Automation helpers” card on the right-hand side of the GUI.
 
 ## Testing the resume hook
 
