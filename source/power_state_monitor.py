@@ -96,7 +96,7 @@ def switch_active_profile(profile_name: str) -> bool:
     if not store or "profiles" not in store:
         return False
     if profile_name not in store.get("profiles", {}):
-        log(f"Profilo '{profile_name}' non trovato.")
+        log(f"Profile '{profile_name}' not found.")
         return False
     store["active"] = profile_name
     try:
@@ -106,14 +106,14 @@ def switch_active_profile(profile_name: str) -> bool:
         os.replace(tmp_path, PROFILE_PATH)
         return True
     except OSError as exc:
-        log(f"Errore nel salvare il profilo: {exc}")
+        log(f"Failed to save profile: {exc}")
         return False
 
 
 def restore_profile(reason: str, power_state: Optional[bool] = None) -> None:
     ensure_restore_script_executable()
     if not os.path.isfile(RESTORE_SCRIPT):
-        log(f"restore_profile.py non trovato ({RESTORE_SCRIPT}).")
+        log(f"restore_profile.py not found ({RESTORE_SCRIPT}).")
         return
 
     # Check if we should switch to a power-specific profile
@@ -128,19 +128,19 @@ def restore_profile(reason: str, power_state: Optional[bool] = None) -> None:
         if target_profile:
             log(f"Switching to {'AC' if power_state else 'battery'} profile: {target_profile}")
             if switch_active_profile(target_profile):
-                log(f"Profilo attivo cambiato a '{target_profile}'")
+                log(f"Active profile switched to '{target_profile}'")
             else:
-                log(f"Impossibile cambiare profilo a '{target_profile}', uso profilo corrente")
+                log(f"Cannot switch profile to '{target_profile}', keeping current profile")
 
     cmd = [PYTHON_EXECUTABLE, RESTORE_SCRIPT]
-    log(f"{reason}: eseguo {' '.join(shlex.quote(part) for part in cmd)}")
+    log(f"{reason}: running {' '.join(shlex.quote(part) for part in cmd)}")
     proc = subprocess.run(cmd, text=True, capture_output=True)
     if proc.stdout:
         print(proc.stdout.strip(), flush=True)
     if proc.stderr:
         print(proc.stderr.strip(), file=sys.stderr, flush=True)
     if proc.returncode != 0:
-        log(f"restore_profile.py uscita con codice {proc.returncode}")
+        log(f"restore_profile.py exited with code {proc.returncode}")
 
 
 def compute_power_state(paths: List[str]) -> Optional[bool]:
@@ -167,9 +167,9 @@ def monitor_loop() -> int:
     paths = discover_mains_online_paths()
     last_state = compute_power_state(paths)
     if last_state is None:
-        log("Impossibile determinare lo stato di alimentazione iniziale.")
+        log("Unable to determine initial power state.")
     else:
-        log(f"Stato iniziale: {'rete' if last_state else 'batteria'}")
+        log(f"Initial power state: {'AC' if last_state else 'battery'}")
 
     while True:
         iteration += 1
@@ -184,9 +184,9 @@ def monitor_loop() -> int:
         if last_state is None:
             last_state = state
         elif state != last_state:
-            label = "rete" if state else "batteria"
-            log(f"Cambio alimentazione: ora su {label}.")
-            restore_profile("Cambio alimentazione", power_state=state)
+            label = "AC" if state else "battery"
+            log(f"Power source changed: now on {label}.")
+            restore_profile("Power source change", power_state=state)
             last_state = state
 
         time.sleep(POLL_INTERVAL_SECONDS)
@@ -196,7 +196,7 @@ def main() -> int:
     try:
         monitor_loop()
     except KeyboardInterrupt:
-        log("Monitor interrotto.")
+        log("Monitor interrupted.")
         return 0
     return 0
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.1 – 2026-01-02
+### GUI
+- Added a GitHub shortcut button in the hero card linking to the repository.
+- Unified power monitor log messages to English for consistent diagnostics.
+
 ## v1.2 – 2026-01-02
 ### New features
 - **Profiles menu in system tray**: Switch between profiles directly from the tray icon without opening the GUI.

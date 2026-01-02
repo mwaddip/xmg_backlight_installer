@@ -13,6 +13,7 @@ import time
 from PySide6 import QtCore, QtWidgets, QtGui
 
 APP_DISPLAY_NAME = "XMG Backlight Management"
+GITHUB_REPO_URL = "https://github.com/Darayavaush-84/xmg_backlight_installer"
 NOTIFICATION_TIMEOUT_MS = 1500
 TOOL_ENV_VAR = "ITE8291R3_CTL"
 TOOL_CANDIDATES = [
@@ -673,6 +674,9 @@ class Main(QtWidgets.QWidget):
         hero_controls = QtWidgets.QVBoxLayout()
         hero_controls.setSpacing(12)
         hero_controls.addStretch(1)
+        self.github_button = QtWidgets.QPushButton("GitHub")
+        self.github_button.setObjectName("pillButton")
+        hero_controls.addWidget(self.github_button, 0, QtCore.Qt.AlignRight)
         self.log_toggle_button = QtWidgets.QPushButton("Show activity log")
         self.log_toggle_button.setCheckable(True)
         self.log_toggle_button.setObjectName("pillButton")
@@ -979,6 +983,7 @@ class Main(QtWidgets.QWidget):
         surface_layout.addWidget(self.console_box)
         surface_layout.addStretch(1)
 
+        self.github_button.clicked.connect(self.on_github_clicked)
         self.log_toggle_button.toggled.connect(self.on_log_toggle_toggled)
 
         self.apply_timer = QtCore.QTimer(self)
@@ -1099,6 +1104,9 @@ class Main(QtWidgets.QWidget):
             self.log_toggle_button.setText(
                 "Hide activity log" if checked else "Show activity log"
             )
+
+    def on_github_clicked(self):
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(GITHUB_REPO_URL))
 
     def show_window_from_tray(self):
         self.show()
