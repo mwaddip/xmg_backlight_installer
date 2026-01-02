@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -14,6 +15,9 @@ from typing import List, Optional
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESTORE_SCRIPT = os.path.join(BASE_DIR, "restore_profile.py")
 PYTHON_EXECUTABLE = sys.executable or shutil.which("python3") or "/usr/bin/python3"
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "backlight-linux")
+SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
+PROFILE_PATH = os.path.join(CONFIG_DIR, "profile.json")
 POWER_SUPPLY_DIR = "/sys/class/power_supply"
 MAINS_TYPES = {"mains", "ac", "usb"}
 POLL_INTERVAL_SECONDS = 3
@@ -66,11 +70,68 @@ def ensure_restore_script_executable() -> None:
             pass
 
 
-def restore_profile(reason: str) -> None:
+def read_settings() -> dict:
+    """Read settings.json to get AC/battery profile preferences."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def read_profile_store() -> dict:
+    """Read profile.json to get available profiles."""
+    try:
+        with open(PROFILE_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def switch_active_profile(profile_name: str) -> bool:
+    """Switch the active profile in profile.json."""
+    store = read_profile_store()
+    if not store or "profiles" not in store:
+        return False
+    if profile_name not in store.get("profiles", {}):
+        log(f"Profilo '{profile_name}' non trovato.")
+        return False
+    store["active"] = profile_name
+    try:
+        tmp_path = PROFILE_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(store, handle, indent=2)
+        os.replace(tmp_path, PROFILE_PATH)
+        return True
+    except OSError as exc:
+        log(f"Errore nel salvare il profilo: {exc}")
+        return False
+
+
+def restore_profile(reason: str, power_state: Optional[bool] = None) -> None:
     ensure_restore_script_executable()
     if not os.path.isfile(RESTORE_SCRIPT):
         log(f"restore_profile.py non trovato ({RESTORE_SCRIPT}).")
         return
+
+    # Check if we should switch to a power-specific profile
+    if power_state is not None:
+        settings = read_settings()
+        target_profile = ""
+        if power_state:  # On AC
+            target_profile = settings.get("ac_profile", "")
+        else:  # On battery
+            target_profile = settings.get("battery_profile", "")
+        
+        if target_profile:
+            log(f"Switching to {'AC' if power_state else 'battery'} profile: {target_profile}")
+            if switch_active_profile(target_profile):
+                log(f"Profilo attivo cambiato a '{target_profile}'")
+            else:
+                log(f"Impossibile cambiare profilo a '{target_profile}', uso profilo corrente")
+
     cmd = [PYTHON_EXECUTABLE, RESTORE_SCRIPT]
     log(f"{reason}: eseguo {' '.join(shlex.quote(part) for part in cmd)}")
     proc = subprocess.run(cmd, text=True, capture_output=True)
@@ -125,7 +186,7 @@ def monitor_loop() -> int:
         elif state != last_state:
             label = "rete" if state else "batteria"
             log(f"Cambio alimentazione: ora su {label}.")
-            restore_profile("Cambio alimentazione")
+            restore_profile("Cambio alimentazione", power_state=state)
             last_state = state
 
         time.sleep(POLL_INTERVAL_SECONDS)

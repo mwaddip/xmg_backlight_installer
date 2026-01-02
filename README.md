@@ -61,10 +61,36 @@ The installer performs these actions:
 
 The GUI now exposes two user-facing preferences (stored under `~/.config/backlight-linux/settings.json`):
 
-- **Add in systray** – start the application minimized to the system tray and keep it running even when the window is closed. A tray icon provides quick actions (Show/Hide window, Turn on/off, Load last profile, Quit).
-- **Show notifications** – toggle desktop toasts emitted by the tray commands (short messages such as “Minimized to tray”).
+- **Add in systray** – start the application minimized to the system tray and keep it running even when the window is closed. A tray icon provides quick actions (Show/Hide window, Turn on/off, Profiles submenu, Quit).
+- **Show notifications** – toggle desktop toasts emitted by the tray commands (short messages such as "Minimized to tray").
 
-Both options live in the “Automation helpers” card on the right-hand side of the GUI.
+The tray icon includes a **Profiles** submenu that lets you switch between saved profiles without opening the main window.
+
+Both options live in the "Smart automations" card on the right-hand side of the GUI.
+
+## Power-based profiles
+
+You can assign different profiles for AC power and battery operation:
+
+1. Create the profiles you want (e.g., "Bright" for AC, "Dim" for battery).
+2. In the **Smart automations** section, use the "On AC" and "On Battery" dropdowns to assign profiles.
+3. Enable the **Power monitor** toggle.
+
+When the power source changes, the monitor automatically switches to the configured profile and applies it. If no profile is assigned for a power state, the current active profile is used.
+
+## Profile management
+
+The **Quick profiles** card provides full profile management:
+
+- **New…** – Create a fresh profile with default settings (static white, brightness 40).
+- **Save** – Save changes to the current profile.
+- **Save as…** – Duplicate the current profile under a new name.
+- **Rename…** – Rename the active profile.
+- **Delete** – Remove the active profile (at least one must remain).
+
+## Dark mode
+
+Enable **Dark Mode** in the Smart automations section for a dark UI theme. The dark theme applies to the main window and all dialogs.
 
 ## Testing the resume hook
 

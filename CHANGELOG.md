@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2 – 2026-01-02
+### New features
+- **Profiles menu in system tray**: Switch between profiles directly from the tray icon without opening the GUI.
+- **Power-based profiles**: Configure different profiles for AC and battery power. The power monitor automatically switches to the appropriate profile when the power source changes.
+- **New profile button**: Added "New…" button to create a fresh profile with default settings.
+
+### GUI
+- Added "On AC" and "On Battery" dropdowns in the Smart automations section to assign profiles per power source.
+- Tray menu now shows all available profiles with a checkmark on the active one.
+- Dark mode now applies consistently to all dialogs (QMessageBox, QInputDialog).
+
+### Fixes
+- Fixed `restore_profile.py` not reading the active profile correctly from the new multi-profile JSON structure.
+
 ## v1.1.1 – 2026-01-02
 ### Installer
 - Added `--uninstall` option to cleanly remove all installed files and configurations.

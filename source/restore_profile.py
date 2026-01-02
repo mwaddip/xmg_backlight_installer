@@ -195,10 +195,22 @@ def run_commands_with_retry(tool, commands):
 
 
 def main():
-    profile = read_profile()
-    if not profile:
+    store = read_profile()
+    if not store:
         print(f"No profile found at {PROFILE_PATH}. Nothing to restore.")
         return 0
+
+    # Extract the active profile data from the store
+    active_name = store.get("active", "Default")
+    profiles = store.get("profiles", {})
+    if active_name in profiles:
+        profile = profiles[active_name]
+    elif profiles:
+        # Fallback to first available profile
+        profile = next(iter(profiles.values()))
+    else:
+        # Legacy format: profile data at root level
+        profile = store
 
     tool = resolve_tool()
     if not tool:

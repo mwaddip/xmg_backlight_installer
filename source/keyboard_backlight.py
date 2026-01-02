@@ -90,6 +90,8 @@ DEFAULT_SETTINGS = {
     "start_in_tray": False,
     "show_notifications": True,
     "dark_mode": False,
+    "ac_profile": "",
+    "battery_profile": "",
 }
 
 
@@ -167,6 +169,8 @@ def sanitize_settings(data):
         data.get("show_notifications", base["show_notifications"])
     )
     base["dark_mode"] = bool(data.get("dark_mode", base["dark_mode"]))
+    base["ac_profile"] = str(data.get("ac_profile", base["ac_profile"]) or "")
+    base["battery_profile"] = str(data.get("battery_profile", base["battery_profile"]) or "")
     return base
 
 
@@ -816,6 +820,8 @@ class Main(QtWidgets.QWidget):
         pl.addWidget(self.profile_combo, 0, 1, 1, 2)
         self.btn_profile_save = QtWidgets.QPushButton("Save")
         pl.addWidget(self.btn_profile_save, 0, 3)
+        self.btn_profile_new = QtWidgets.QPushButton("New…")
+        pl.addWidget(self.btn_profile_new, 1, 0)
         self.btn_profile_save_as = QtWidgets.QPushButton("Save as…")
         pl.addWidget(self.btn_profile_save_as, 1, 1)
         self.btn_profile_rename = QtWidgets.QPushButton("Rename…")
@@ -907,6 +913,31 @@ class Main(QtWidgets.QWidget):
             selectable=True,
         )
 
+        power_profiles_row = QtWidgets.QFrame()
+        power_profiles_row.setObjectName("helperRow")
+        pp_layout = QtWidgets.QGridLayout(power_profiles_row)
+        pp_layout.setContentsMargins(12, 10, 12, 10)
+        pp_layout.setHorizontalSpacing(12)
+        pp_layout.setVerticalSpacing(8)
+
+        pp_label = QtWidgets.QLabel("Power-based profiles")
+        pp_label.setObjectName("helperLabel")
+        pp_layout.addWidget(pp_label, 0, 0, 1, 2)
+
+        ac_label = QtWidgets.QLabel("On AC:")
+        pp_layout.addWidget(ac_label, 1, 0)
+        self.ac_profile_combo = QtWidgets.QComboBox()
+        self.ac_profile_combo.setToolTip("Profile to apply when connected to AC power")
+        pp_layout.addWidget(self.ac_profile_combo, 1, 1)
+
+        battery_label = QtWidgets.QLabel("On Battery:")
+        pp_layout.addWidget(battery_label, 2, 0)
+        self.battery_profile_combo = QtWidgets.QComboBox()
+        self.battery_profile_combo.setToolTip("Profile to apply when running on battery")
+        pp_layout.addWidget(self.battery_profile_combo, 2, 1)
+
+        helper_list.addWidget(power_profiles_row)
+
         settings_row = QtWidgets.QFrame()
         settings_layout = QtWidgets.QHBoxLayout(settings_row)
         settings_layout.setContentsMargins(0, 12, 0, 0)
@@ -984,6 +1015,7 @@ class Main(QtWidgets.QWidget):
         self.reactive.toggled.connect(self.schedule_apply)
 
         self.profile_combo.currentTextChanged.connect(self.on_profile_combo_changed)
+        self.btn_profile_new.clicked.connect(self.on_profile_new_clicked)
         self.btn_profile_save.clicked.connect(self.on_profile_save_clicked)
         self.btn_profile_save_as.clicked.connect(self.on_profile_save_as_clicked)
         self.btn_profile_rename.clicked.connect(self.on_profile_rename_clicked)
@@ -994,10 +1026,13 @@ class Main(QtWidgets.QWidget):
         self.power_monitor_flag.toggled.connect(self.on_power_monitor_flag_changed)
         self.notifications_checkbox.toggled.connect(self.on_notifications_toggled)
         self.dark_mode_checkbox.toggled.connect(self.on_dark_mode_toggled)
+        self.ac_profile_combo.currentTextChanged.connect(self.on_ac_profile_changed)
+        self.battery_profile_combo.currentTextChanged.connect(self.on_battery_profile_changed)
         self.refresh_autostart_flag()
         self.refresh_resume_controls()
         self.refresh_power_monitor_controls()
         self.refresh_profile_combo()
+        self.refresh_power_profile_combos()
 
         if self.profile_data:
             self.restore_profile_after_startup()
@@ -1042,8 +1077,9 @@ class Main(QtWidgets.QWidget):
             turn_on_action.triggered.connect(self.on_tray_turn_on)
             turn_off_action = menu.addAction("Turn off")
             turn_off_action.triggered.connect(self.on_tray_turn_off)
-            load_profile_action = menu.addAction("Load last profile")
-            load_profile_action.triggered.connect(self.on_tray_load_last_profile)
+            menu.addSeparator()
+            self.tray_profiles_menu = menu.addMenu("Profiles")
+            self.rebuild_tray_profiles_menu()
             menu.addSeparator()
             quit_action = menu.addAction("Quit")
             quit_action.triggered.connect(self.on_tray_quit)
@@ -1077,9 +1113,24 @@ class Main(QtWidgets.QWidget):
         self.on_power_off()
         self.notify(APP_DISPLAY_NAME, "Backlight turned off.")
 
-    def on_tray_load_last_profile(self):
-        self.restore_profile_after_startup()
-        self.notify(APP_DISPLAY_NAME, f"Profile '{self.active_profile_name}' applied.")
+    def rebuild_tray_profiles_menu(self):
+        if not hasattr(self, "tray_profiles_menu"):
+            return
+        self.tray_profiles_menu.clear()
+        for name in self.profile_store["profiles"].keys():
+            action = self.tray_profiles_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == self.active_profile_name)
+            action.triggered.connect(lambda checked, n=name: self.on_tray_profile_selected(n))
+
+    def on_tray_profile_selected(self, name):
+        if name == self.active_profile_name:
+            self.restore_profile_after_startup()
+            self.notify(APP_DISPLAY_NAME, f"Profile '{name}' reapplied.")
+            return
+        self.switch_active_profile(name, triggered_by_user=True)
+        self.rebuild_tray_profiles_menu()
+        self.notify(APP_DISPLAY_NAME, f"Profile '{name}' applied.")
 
     def on_tray_quit(self):
         self._quitting = True
@@ -1127,6 +1178,51 @@ class Main(QtWidgets.QWidget):
         self.settings["dark_mode"] = checked
         self.save_settings()
         self.apply_styles()
+
+    def refresh_power_profile_combos(self):
+        if not hasattr(self, "ac_profile_combo") or not hasattr(self, "battery_profile_combo"):
+            return
+        profile_names = ["(none)"] + list(self.profile_store["profiles"].keys())
+
+        ac_blocker = QtCore.QSignalBlocker(self.ac_profile_combo)
+        battery_blocker = QtCore.QSignalBlocker(self.battery_profile_combo)
+        try:
+            self.ac_profile_combo.clear()
+            self.battery_profile_combo.clear()
+            self.ac_profile_combo.addItems(profile_names)
+            self.battery_profile_combo.addItems(profile_names)
+
+            ac_profile = self.settings.get("ac_profile", "")
+            battery_profile = self.settings.get("battery_profile", "")
+
+            ac_idx = self.ac_profile_combo.findText(ac_profile) if ac_profile else 0
+            if ac_idx < 0:
+                ac_idx = 0
+            self.ac_profile_combo.setCurrentIndex(ac_idx)
+
+            battery_idx = self.battery_profile_combo.findText(battery_profile) if battery_profile else 0
+            if battery_idx < 0:
+                battery_idx = 0
+            self.battery_profile_combo.setCurrentIndex(battery_idx)
+        finally:
+            del ac_blocker
+            del battery_blocker
+
+    def on_ac_profile_changed(self, text):
+        value = "" if text == "(none)" else text
+        if self.settings.get("ac_profile") == value:
+            return
+        self.settings["ac_profile"] = value
+        self.save_settings()
+        self.set_status(f"AC profile set to: {text}")
+
+    def on_battery_profile_changed(self, text):
+        value = "" if text == "(none)" else text
+        if self.settings.get("battery_profile") == value:
+            return
+        self.settings["battery_profile"] = value
+        self.save_settings()
+        self.set_status(f"Battery profile set to: {text}")
 
     def set_status(self, t, level="info"):
         self.log(t, level=level)
@@ -1586,6 +1682,32 @@ class Main(QtWidgets.QWidget):
             color: #64748b;
             border: 2px solid #334155;
         }
+        QMessageBox {
+            background-color: #1e293b;
+            color: #e2e8f0;
+        }
+        QMessageBox QLabel {
+            color: #e2e8f0;
+        }
+        QMessageBox QPushButton {
+            min-width: 80px;
+            padding: 8px 16px;
+        }
+        QInputDialog {
+            background-color: #1e293b;
+            color: #e2e8f0;
+        }
+        QInputDialog QLabel {
+            color: #e2e8f0;
+        }
+        QInputDialog QLineEdit {
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-size: 13px;
+        }
         """
         if self.settings.get("dark_mode", False):
             self.setStyleSheet(dark)
@@ -1708,6 +1830,8 @@ class Main(QtWidgets.QWidget):
         finally:
             self._updating_profile_combo = False
             del blocker
+        self.rebuild_tray_profiles_menu()
+        self.refresh_power_profile_combos()
 
     def on_profile_combo_changed(self, name):
         if self._updating_profile_combo or not name:
@@ -1729,6 +1853,24 @@ class Main(QtWidgets.QWidget):
     def on_profile_save_clicked(self):
         self.persist_profile()
         self.set_status(f"Profile '{self.active_profile_name}' saved.")
+
+    def on_profile_new_clicked(self):
+        name = self.prompt_profile_name("New profile", "Profile name:")
+        if not name:
+            return
+        if name in self.profile_store["profiles"]:
+            QtWidgets.QMessageBox.warning(
+                self, "Name in use", "A profile with that name already exists."
+            )
+            return
+        self.profile_store["profiles"][name] = dict(DEFAULT_PROFILE_STATE)
+        self.active_profile_name = name
+        self.profile_store["active"] = name
+        self.profile_data = dict(DEFAULT_PROFILE_STATE)
+        self.save_profile_store()
+        self.refresh_profile_combo()
+        self.load_profile_into_controls(self.profile_data)
+        self.set_status(f"New profile '{name}' created.")
 
     def on_profile_save_as_clicked(self):
         name = self.prompt_profile_name("Save profile", "Profile name:", self.active_profile_name)
