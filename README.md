@@ -32,21 +32,32 @@ Installer and deployment helper for the **backlight-linux** GUI that controls th
 
 ## Uninstallation
 
-To completely remove the installed files and configurations:
+To remove the installed files and configurations:
 
 ```bash
 sudo python3 install.py --uninstall
 ```
 
-This removes:
-- GUI scripts from `/usr/share/xmg-backlight`
-- Launcher wrapper at `/usr/local/bin/xmg-backlight`
-- Desktop entry and autostart files
-- System-sleep hook and systemd drop-ins
+When run without additional flags, the installer will prompt you to choose:
+1. **Partial removal** – removes only system files (GUI scripts, launcher, desktop entry, systemd hooks)
+2. **Full removal** – removes everything including pip packages and user profiles
 
-**Note:** pip packages (`ite8291r3-ctl`, `PySide6`) are **not** removed automatically. To remove them:
+### Command-line flags
+
+For scripted/non-interactive uninstallation:
+
 ```bash
-pip uninstall ite8291r3-ctl PySide6
+# Remove system files only
+sudo python3 install.py --uninstall
+
+# Also remove pip packages (ite8291r3-ctl, PySide6, shiboken6)
+sudo python3 install.py --uninstall --purge
+
+# Also remove user profiles (~/.config/backlight-linux/)
+sudo python3 install.py --uninstall --purge-user-data
+
+# Full removal (pip packages + user profiles)
+sudo python3 install.py --uninstall --purge --purge-user-data
 ```
 
 The installer performs these actions:

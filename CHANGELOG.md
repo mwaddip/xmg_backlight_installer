@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.3 – 2026-01-03
+### Installer
+- Added `--purge` flag for `--uninstall` to also remove pip packages (ite8291r3-ctl, PySide6, shiboken6).
+- Added `--purge-user-data` flag to remove user profiles, systemd user services, and autostart entries.
+- Interactive uninstall: when run without flags, prompts user to choose between partial or full removal.
+- Full uninstall now removes all user-created files: `~/.config/backlight-linux/`, `~/.config/systemd/user/keyboard-backlight-*`, and `~/.config/autostart/keyboard-backlight-*`.
+- Increased resume hook delay from 5s to 8s for better USB stability after suspend.
+
+### GUI
+- Added "Export logs" button to collect all logs (resume hook, power monitor, config files) into a ZIP file for easy troubleshooting.
+
 ## v1.2.1 – 2026-01-02
 ### GUI
 - Added a GitHub shortcut button in the hero card linking to the repository.

@@ -338,7 +338,7 @@ def create_system_sleep_hook() -> None:
         if [ "$phase" != "post" ]; then
           exit 0
         fi
-        sleep 5
+        sleep 8
         printf "%s: starting restore for users\\n" "$(date)" >> "$LOGFILE"
         if command -v loginctl >/dev/null 2>&1; then
           users=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{{print $3}}' | sort -u)
@@ -406,8 +406,70 @@ def reload_systemd_daemon() -> None:
     run(["systemctl", "daemon-reload"], check=False)
 
 
-def uninstall() -> None:
-    """Remove all installed files and configurations."""
+def remove_user_data() -> None:
+    """Remove user configuration, profiles, systemd services, and autostart entries for all users."""
+    import pwd
+    import glob
+    removed_any = False
+    
+    for entry in pwd.getpwall():
+        if entry.pw_uid < 1000:
+            continue  # Skip system users
+        
+        home = Path(entry.pw_dir)
+        
+        # Remove config directory (~/.config/backlight-linux/)
+        config_dir = home / ".config" / "backlight-linux"
+        if config_dir.exists():
+            shutil.rmtree(config_dir)
+            log(f"Removed user config: {config_dir}")
+            removed_any = True
+        
+        # Remove systemd user services (~/.config/systemd/user/keyboard-backlight-*.service)
+        systemd_user_dir = home / ".config" / "systemd" / "user"
+        if systemd_user_dir.exists():
+            for service_file in systemd_user_dir.glob("keyboard-backlight-*.service"):
+                service_file.unlink()
+                log(f"Removed user service: {service_file}")
+                removed_any = True
+            
+            # Remove symlinks in target.wants directories
+            for target_dir in systemd_user_dir.glob("*.target.wants"):
+                for symlink in target_dir.glob("keyboard-backlight-*"):
+                    if symlink.is_symlink() or symlink.exists():
+                        symlink.unlink()
+                        log(f"Removed service symlink: {symlink}")
+                        removed_any = True
+                # Remove empty target.wants directories
+                if target_dir.exists() and not any(target_dir.iterdir()):
+                    target_dir.rmdir()
+                    log(f"Removed empty directory: {target_dir}")
+        
+        # Remove autostart entries (~/.config/autostart/keyboard-backlight-*.desktop)
+        autostart_dir = home / ".config" / "autostart"
+        if autostart_dir.exists():
+            for desktop_file in autostart_dir.glob("keyboard-backlight-*.desktop"):
+                desktop_file.unlink()
+                log(f"Removed autostart entry: {desktop_file}")
+                removed_any = True
+            # Also remove xmg-backlight.desktop if present
+            xmg_autostart = autostart_dir / "xmg-backlight.desktop"
+            if xmg_autostart.exists():
+                xmg_autostart.unlink()
+                log(f"Removed autostart entry: {xmg_autostart}")
+                removed_any = True
+    
+    if not removed_any:
+        log("No user data found to remove.")
+
+
+def uninstall(purge: bool = False, purge_user_data: bool = False) -> None:
+    """Remove all installed files and configurations.
+    
+    Args:
+        purge: If True, also remove pip packages (ite8291r3-ctl, PySide6).
+        purge_user_data: If True, also remove user profiles and settings.
+    """
     log("Starting uninstallation...")
     
     # Remove systemd drop-ins
@@ -442,9 +504,29 @@ def uninstall() -> None:
     # Reload systemd
     reload_systemd_daemon()
     
+    # Optionally remove pip packages
+    if purge:
+        log("Removing pip packages (--purge specified)...")
+        for pkg in ["ite8291r3-ctl", "PySide6", "PySide6_Addons", "PySide6_Essentials", "shiboken6"]:
+            rc, _, _ = run(
+                [sys.executable, "-m", "pip", "uninstall", "-y", pkg],
+                check=False,
+            )
+            if rc == 0:
+                log(f"Removed pip package: {pkg}")
+            else:
+                log(f"Could not remove {pkg} (may not be installed or requires different pip)")
+    
+    # Optionally remove user data
+    if purge_user_data:
+        log("Removing user profiles and settings...")
+        remove_user_data()
+    
     log("Uninstallation completed.")
-    log("Note: pip packages (ite8291r3-ctl, PySide6) were NOT removed.")
-    log("To remove them manually: pip uninstall ite8291r3-ctl PySide6")
+    if not purge:
+        log("Note: pip packages (ite8291r3-ctl, PySide6) were NOT removed.")
+    if not purge_user_data:
+        log("Note: User profiles (~/.config/backlight-linux/) were NOT removed.")
 
 
 def main() -> None:
@@ -456,13 +538,40 @@ def main() -> None:
         action="store_true",
         help="Remove all installed files and configurations.",
     )
+    parser.add_argument(
+        "--purge",
+        action="store_true",
+        help="Used with --uninstall: also remove pip packages (ite8291r3-ctl, PySide6).",
+    )
+    parser.add_argument(
+        "--purge-user-data",
+        action="store_true",
+        help="Used with --uninstall: also remove user profiles and settings.",
+    )
     args = parser.parse_args()
 
     log(FEDORA_NOTICE)
     require_root()
 
     if args.uninstall:
-        uninstall()
+        purge = args.purge
+        purge_user_data = getattr(args, 'purge_user_data', False)
+        
+        # Interactive mode if no flags provided
+        if not purge and not purge_user_data:
+            print("\nUninstall options:")
+            print("  1) Remove software and system files only")
+            print("  2) Remove everything (software, pip packages, and user profiles)")
+            print("")
+            choice = input("Choose an option [1/2] (default: 1): ").strip()
+            if choice == "2":
+                purge = True
+                purge_user_data = True
+                log("Full uninstall selected.")
+            else:
+                log("Partial uninstall selected (software only).")
+        
+        uninstall(purge=purge, purge_user_data=purge_user_data)
         return
 
     detect_driver()

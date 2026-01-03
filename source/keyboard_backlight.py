@@ -13,6 +13,7 @@ import time
 from PySide6 import QtCore, QtWidgets, QtGui
 
 APP_DISPLAY_NAME = "XMG Backlight Management"
+APP_VERSION = "1.3"
 GITHUB_REPO_URL = "https://github.com/Darayavaush-84/xmg_backlight_installer"
 NOTIFICATION_TIMEOUT_MS = 1500
 TOOL_ENV_VAR = "ITE8291R3_CTL"
@@ -677,6 +678,9 @@ class Main(QtWidgets.QWidget):
         self.github_button = QtWidgets.QPushButton("GitHub")
         self.github_button.setObjectName("pillButton")
         hero_controls.addWidget(self.github_button, 0, QtCore.Qt.AlignRight)
+        self.export_logs_button = QtWidgets.QPushButton("Export logs")
+        self.export_logs_button.setObjectName("pillButton")
+        hero_controls.addWidget(self.export_logs_button, 0, QtCore.Qt.AlignRight)
         self.log_toggle_button = QtWidgets.QPushButton("Show activity log")
         self.log_toggle_button.setCheckable(True)
         self.log_toggle_button.setObjectName("pillButton")
@@ -984,6 +988,7 @@ class Main(QtWidgets.QWidget):
         surface_layout.addStretch(1)
 
         self.github_button.clicked.connect(self.on_github_clicked)
+        self.export_logs_button.clicked.connect(self.on_export_logs_clicked)
         self.log_toggle_button.toggled.connect(self.on_log_toggle_toggled)
 
         self.apply_timer = QtCore.QTimer(self)
@@ -1107,6 +1112,86 @@ class Main(QtWidgets.QWidget):
 
     def on_github_clicked(self):
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(GITHUB_REPO_URL))
+
+    def on_export_logs_clicked(self):
+        import zipfile
+        import tempfile
+        from datetime import datetime
+        
+        # Ask user where to save the ZIP
+        default_name = f"xmg-backlight-logs-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export Logs",
+            os.path.expanduser(f"~/{default_name}"),
+            "ZIP files (*.zip)"
+        )
+        if not file_path:
+            return
+        
+        try:
+            with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # 1. Resume hook log
+                resume_log = "/tmp/xmg-backlight-resume.log"
+                if os.path.exists(resume_log):
+                    zf.write(resume_log, "resume-hook.log")
+                
+                # 2. Power monitor journal
+                try:
+                    result = subprocess.run(
+                        ["journalctl", "--user", "-u", "keyboard-backlight-power-monitor", 
+                         "--since", "24 hours ago", "--no-pager"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.stdout.strip():
+                        zf.writestr("power-monitor.log", result.stdout)
+                except Exception:
+                    pass
+                
+                # 3. Resume service journal
+                try:
+                    result = subprocess.run(
+                        ["journalctl", "--user", "-u", "keyboard-backlight-resume.service",
+                         "--since", "24 hours ago", "--no-pager"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.stdout.strip():
+                        zf.writestr("resume-service.log", result.stdout)
+                except Exception:
+                    pass
+                
+                # 4. User config files
+                if os.path.isdir(CONFIG_DIR):
+                    for config_file in ["settings.json", "profile.json"]:
+                        config_path = os.path.join(CONFIG_DIR, config_file)
+                        if os.path.isfile(config_path):
+                            zf.write(config_path, f"config/{config_file}")
+                
+                # 5. System info
+                system_info = []
+                system_info.append(f"Export date: {datetime.now().isoformat()}")
+                system_info.append(f"App version: {APP_VERSION}")
+                try:
+                    result = subprocess.run(["uname", "-a"], capture_output=True, text=True, timeout=5)
+                    system_info.append(f"System: {result.stdout.strip()}")
+                except Exception:
+                    pass
+                try:
+                    result = subprocess.run(["ite8291r3-ctl", "--version"], capture_output=True, text=True, timeout=5)
+                    system_info.append(f"Driver: {result.stdout.strip() or result.stderr.strip()}")
+                except Exception:
+                    system_info.append("Driver: not found")
+                zf.writestr("system-info.txt", "\n".join(system_info))
+            
+            QtWidgets.QMessageBox.information(
+                self, "Export Complete",
+                f"Logs exported successfully to:\n{file_path}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Export Failed",
+                f"Failed to export logs:\n{str(e)}"
+            )
 
     def show_window_from_tray(self):
         self.show()
