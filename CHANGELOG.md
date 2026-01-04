@@ -29,7 +29,7 @@
 - Added a GitHub shortcut button in the hero card linking to the repository.
 - Unified power monitor log messages to English for consistent diagnostics.
 
-## v1.2 – 2026-01-02
+## v1.2.0 – 2026-01-02
 ### New features
 - **Profiles menu in system tray**: Switch between profiles directly from the tray icon without opening the GUI.
 - **Power-based profiles**: Configure different profiles for AC and battery power. The power monitor automatically switches to the appropriate profile when the power source changes.
