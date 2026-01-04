@@ -451,14 +451,14 @@ def enable_resume_service():
     rc, _, err = systemctl_user(["daemon-reload"])
     if rc != 0:
         return False, err or "Failed to reload systemd user daemon."
-    rc, out, err = systemctl_user(["enable", "--now", RESUME_SERVICE_NAME])
+    rc, out, err = systemctl_user(["enable", RESUME_SERVICE_NAME])
     if rc != 0:
         return False, err or out or "Failed to enable resume service."
     return True, "Resume service enabled."
 
 
 def disable_resume_service():
-    rc, out, err = systemctl_user(["disable", "--now", RESUME_SERVICE_NAME])
+    rc, out, err = systemctl_user(["disable", RESUME_SERVICE_NAME])
     if rc not in (0, 1, 5):
         return False, err or out or "Failed to disable resume service."
     remove_resume_service_file()

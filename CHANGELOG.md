@@ -12,6 +12,7 @@
 ### GUI
 - Log exports now include the installer log when available.
 - Sync device state when opening/activating the GUI or interacting with the system tray (click/menu), logging the result in the activity log.
+- Enabling resume restore no longer triggers an immediate profile restore.
 
 ## v1.3.0 – 2026-01-03
 ### Installer
