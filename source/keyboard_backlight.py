@@ -93,7 +93,7 @@ DEFAULT_PROFILE_STATE = {
 DEFAULT_SETTINGS = {
     "start_in_tray": False,
     "show_notifications": True,
-    "dark_mode": False,
+    "dark_mode": True,
     "ac_profile": "",
     "battery_profile": "",
 }
