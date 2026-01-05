@@ -10,12 +10,14 @@ import stat
 import subprocess
 import sys
 import time
+from collections import deque
 from PySide6 import QtCore, QtWidgets, QtGui
 
 APP_DISPLAY_NAME = "XMG Backlight Management"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 GITHUB_REPO_URL = "https://github.com/Darayavaush-84/xmg_backlight_installer"
 NOTIFICATION_TIMEOUT_MS = 1500
+ACTIVITY_LOG_MAX_LINES = 100
 TOOL_ENV_VAR = "ITE8291R3_CTL"
 TOOL_CANDIDATES = [
     os.environ.get(TOOL_ENV_VAR),
@@ -588,6 +590,7 @@ class Main(QtWidgets.QWidget):
         super().__init__()
         self.setWindowTitle(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
         self.resize(980, 500)
+        self.activity_log_buffer = deque(maxlen=ACTIVITY_LOG_MAX_LINES)
 
         QtWidgets.QApplication.setStyle("Fusion")
         QtWidgets.QApplication.setQuitOnLastWindowClosed(False)
@@ -840,6 +843,33 @@ class Main(QtWidgets.QWidget):
         pl.addWidget(self.btn_profile_delete, 1, 3)
         profiles_layout.addLayout(pl)
 
+        pp_title = QtWidgets.QLabel("Power-based profiles")
+        pp_title.setObjectName("sectionTitle")
+        pp_title.setContentsMargins(0, 12, 0, 0)
+        profiles_layout.addWidget(pp_title)
+
+        power_profiles_row = QtWidgets.QFrame()
+        power_profiles_row.setObjectName("helperRow")
+        pp_layout = QtWidgets.QGridLayout(power_profiles_row)
+        pp_layout.setContentsMargins(12, 10, 12, 10)
+        pp_layout.setHorizontalSpacing(12)
+        pp_layout.setVerticalSpacing(8)
+        pp_layout.setColumnStretch(1, 1)
+
+        ac_label = QtWidgets.QLabel("On AC:")
+        pp_layout.addWidget(ac_label, 0, 0)
+        self.ac_profile_combo = QtWidgets.QComboBox()
+        self.ac_profile_combo.setToolTip("Profile to apply when connected to AC power")
+        pp_layout.addWidget(self.ac_profile_combo, 0, 1)
+
+        battery_label = QtWidgets.QLabel("On Battery:")
+        pp_layout.addWidget(battery_label, 1, 0)
+        self.battery_profile_combo = QtWidgets.QComboBox()
+        self.battery_profile_combo.setToolTip("Profile to apply when running on battery")
+        pp_layout.addWidget(self.battery_profile_combo, 1, 1)
+
+        profiles_layout.addWidget(power_profiles_row)
+
         left_col.addWidget(profiles_card)
 
         helper_card = QtWidgets.QFrame()
@@ -923,31 +953,6 @@ class Main(QtWidgets.QWidget):
             selectable=True,
         )
 
-        power_profiles_row = QtWidgets.QFrame()
-        power_profiles_row.setObjectName("helperRow")
-        pp_layout = QtWidgets.QGridLayout(power_profiles_row)
-        pp_layout.setContentsMargins(12, 10, 12, 10)
-        pp_layout.setHorizontalSpacing(12)
-        pp_layout.setVerticalSpacing(8)
-
-        pp_label = QtWidgets.QLabel("Power-based profiles")
-        pp_label.setObjectName("helperLabel")
-        pp_layout.addWidget(pp_label, 0, 0, 1, 2)
-
-        ac_label = QtWidgets.QLabel("On AC:")
-        pp_layout.addWidget(ac_label, 1, 0)
-        self.ac_profile_combo = QtWidgets.QComboBox()
-        self.ac_profile_combo.setToolTip("Profile to apply when connected to AC power")
-        pp_layout.addWidget(self.ac_profile_combo, 1, 1)
-
-        battery_label = QtWidgets.QLabel("On Battery:")
-        pp_layout.addWidget(battery_label, 2, 0)
-        self.battery_profile_combo = QtWidgets.QComboBox()
-        self.battery_profile_combo.setToolTip("Profile to apply when running on battery")
-        pp_layout.addWidget(self.battery_profile_combo, 2, 1)
-
-        helper_list.addWidget(power_profiles_row)
-
         settings_row = QtWidgets.QFrame()
         settings_layout = QtWidgets.QHBoxLayout(settings_row)
         settings_layout.setContentsMargins(0, 12, 0, 0)
@@ -964,34 +969,52 @@ class Main(QtWidgets.QWidget):
         right_col.addWidget(helper_card)
         right_col.addStretch(1)
 
-        self.console_box = QtWidgets.QFrame()
-        self.console_box.setObjectName("surfaceCard")
-        console_layout = QtWidgets.QVBoxLayout(self.console_box)
-        console_layout.setContentsMargins(24, 24, 24, 24)
-        console_layout.setSpacing(12)
+        surface_layout.addStretch(1)
+        self.log_window = QtWidgets.QDialog(self)
+        self.log_window.setObjectName("logWindow")
+        self.log_window.setWindowTitle("Activity log")
+        self.log_window.setModal(False)
+        self.log_window.setSizeGripEnabled(True)
+        self.log_window.setMinimumSize(520, 260)
+        log_window_layout = QtWidgets.QVBoxLayout(self.log_window)
+        log_window_layout.setContentsMargins(24, 24, 24, 24)
+        log_window_layout.setSpacing(12)
 
-        console_header = QtWidgets.QHBoxLayout()
-        console_header.setSpacing(12)
-        console_title = QtWidgets.QLabel("Activity log")
-        console_title.setObjectName("sectionTitle")
-        console_header.addWidget(console_title)
-        console_header.addStretch(1)
-        console_layout.addLayout(console_header)
+        self.log_card = QtWidgets.QFrame()
+        self.log_card.setObjectName("surfaceCard")
+        log_window_layout.addWidget(self.log_card)
+
+        log_layout = QtWidgets.QVBoxLayout(self.log_card)
+        log_layout.setContentsMargins(20, 20, 20, 20)
+        log_layout.setSpacing(12)
+
+        log_header = QtWidgets.QHBoxLayout()
+        log_header.setSpacing(12)
+        log_title = QtWidgets.QLabel("Activity log")
+        log_title.setObjectName("sectionTitle")
+        log_header.addWidget(log_title)
+        log_header.addStretch(1)
+        self.log_close_button = QtWidgets.QPushButton("Close")
+        self.log_close_button.setObjectName("pillButton")
+        log_header.addWidget(self.log_close_button)
+        log_layout.addLayout(log_header)
 
         self.console = QtWidgets.QTextEdit()
         self.console.setObjectName("logView")
         self.console.setReadOnly(True)
-        self.console.setLineWrapMode(QtWidgets.QTextEdit.NoWrap)
-        console_layout.addWidget(self.console, 1)
+        self.console.setLineWrapMode(QtWidgets.QTextEdit.WidgetWidth)
+        self.console.setWordWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.console.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.console.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        log_layout.addWidget(self.console, 1)
 
-        self.console_box.setVisible(False)
-
-        surface_layout.addWidget(self.console_box)
-        surface_layout.addStretch(1)
+        self.log_window.finished.connect(self.on_log_window_closed)
+        self.log_window.hide()
 
         self.github_button.clicked.connect(self.on_github_clicked)
         self.export_logs_button.clicked.connect(self.on_export_logs_clicked)
         self.log_toggle_button.toggled.connect(self.on_log_toggle_toggled)
+        self.log_close_button.clicked.connect(self.on_log_close_clicked)
 
         self.apply_timer = QtCore.QTimer(self)
         self.apply_timer.setSingleShot(True)
@@ -1055,13 +1078,26 @@ class Main(QtWidgets.QWidget):
         self._last_sync_ts = 0.0
         self.setup_tray_icon(enable_tray=enable_tray)
 
+    def _append_activity_log_lines(self, text, level, timestamp):
+        if not hasattr(self, "activity_log_buffer"):
+            return
+        prefix = f"[{timestamp}] [{level}] "
+        lines = str(text).splitlines() or [""]
+        self.activity_log_buffer.append(prefix + lines[0])
+        indent = " " * len(prefix)
+        for line in lines[1:]:
+            self.activity_log_buffer.append(indent + line)
+
     def log(self, text, level="info"):
         timestamp = time.strftime("%H:%M:%S")
+        self._append_activity_log_lines(text, level, timestamp)
         entry = format_log(f"[{timestamp}] {text}", level)
         self.console.append(entry)
         sb = self.console.verticalScrollBar()
         if sb:
             sb.setValue(sb.maximum())
+        if hasattr(self, "log_window") and self.log_window.isVisible():
+            self._fit_log_window()
 
     def save_settings(self):
         try:
@@ -1106,13 +1142,123 @@ class Main(QtWidgets.QWidget):
             self.notify(APP_DISPLAY_NAME, "Minimized to tray.")
 
     def on_log_toggle_toggled(self, checked):
-        if not hasattr(self, "console_box"):
+        if not hasattr(self, "log_window"):
             return
-        self.console_box.setVisible(checked)
+        if checked:
+            self.log_window.show()
+            self.log_window.raise_()
+            self.log_window.activateWindow()
+            self._fit_log_window()
+        else:
+            self.log_window.hide()
         if hasattr(self, "log_toggle_button"):
             self.log_toggle_button.setText(
                 "Hide activity log" if checked else "Show activity log"
             )
+
+    def on_log_close_clicked(self):
+        if hasattr(self, "log_window"):
+            self.log_window.close()
+
+    def on_log_window_closed(self, _result=None):
+        if not hasattr(self, "log_toggle_button"):
+            return
+        blocker = QtCore.QSignalBlocker(self.log_toggle_button)
+        try:
+            self.log_toggle_button.setChecked(False)
+            self.log_toggle_button.setText("Show activity log")
+        finally:
+            del blocker
+
+    def _fit_log_window(self):
+        if not hasattr(self, "log_window") or not self.log_window.isVisible():
+            return
+        screen = self.log_window.screen()
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        outer_margin = 48
+        max_width = min(900, max(520, available.width() - outer_margin))
+        target_width = max_width
+        window_layout = self.log_window.layout()
+        window_margins = window_layout.contentsMargins() if window_layout else QtCore.QMargins()
+        card_layout = self.log_card.layout() if hasattr(self, "log_card") else None
+        card_margins = card_layout.contentsMargins() if card_layout else QtCore.QMargins()
+        header_height = 0
+        if card_layout and card_layout.count() > 0:
+            header_item = card_layout.itemAt(0)
+            if header_item:
+                header_height = header_item.sizeHint().height()
+
+        text_width = (
+            target_width
+            - window_margins.left() - window_margins.right()
+            - card_margins.left() - card_margins.right()
+        )
+        if text_width < 320:
+            text_width = 320
+        self.console.setFixedWidth(text_width)
+        self.console.document().setTextWidth(self.console.viewport().width())
+        self.console.document().adjustSize()
+
+        max_height = available.height() - outer_margin
+        max_text_height = (
+            max_height
+            - window_margins.top() - window_margins.bottom()
+            - card_margins.top() - card_margins.bottom()
+            - header_height
+        )
+        if max_text_height < 120:
+            max_text_height = 120
+        self._trim_log_to_fit(max_text_height)
+        self.console.document().adjustSize()
+        doc_height = int(self.console.document().size().height())
+        text_height = min(doc_height, max_text_height)
+        self.console.setFixedHeight(max(80, text_height + 4))
+
+        target_height = (
+            window_margins.top() + window_margins.bottom()
+            + card_margins.top() + card_margins.bottom()
+            + header_height + text_height + 4
+        )
+        if target_height < 260:
+            target_height = 260
+        if target_height > max_height:
+            target_height = max_height
+
+        self.log_window.resize(target_width, target_height)
+        self._clamp_log_window_to_screen(available)
+
+    def _trim_log_to_fit(self, max_text_height):
+        doc = self.console.document()
+        doc.setTextWidth(self.console.viewport().width())
+        doc.adjustSize()
+        if doc.size().height() <= max_text_height:
+            return
+        while doc.size().height() > max_text_height and doc.blockCount() > 1:
+            cursor = QtGui.QTextCursor(doc)
+            cursor.movePosition(QtGui.QTextCursor.Start)
+            cursor.movePosition(QtGui.QTextCursor.NextBlock, QtGui.QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()
+            doc.setTextWidth(self.console.viewport().width())
+            doc.adjustSize()
+
+    def _clamp_log_window_to_screen(self, available):
+        frame = self.log_window.frameGeometry()
+        new_frame = QtCore.QRect(frame)
+        if new_frame.left() < available.left():
+            new_frame.moveLeft(available.left())
+        if new_frame.top() < available.top():
+            new_frame.moveTop(available.top())
+        if new_frame.right() > available.right():
+            new_frame.moveRight(available.right())
+        if new_frame.bottom() > available.bottom():
+            new_frame.moveBottom(available.bottom())
+        if new_frame != frame:
+            self.log_window.move(new_frame.topLeft())
 
     def on_github_clicked(self):
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(GITHUB_REPO_URL))
@@ -1179,8 +1325,13 @@ class Main(QtWidgets.QWidget):
                         config_path = os.path.join(CONFIG_DIR, config_file)
                         if os.path.isfile(config_path):
                             zf.write(config_path, f"config/{config_file}")
-                
-                # 6. System info
+
+                # 6. Activity log
+                if hasattr(self, "activity_log_buffer") and self.activity_log_buffer:
+                    log_text = "\n".join(self.activity_log_buffer) + "\n"
+                    zf.writestr("activity-log.txt", log_text)
+
+                # 7. System info
                 system_info = []
                 system_info.append(f"Export date: {datetime.now().isoformat()}")
                 system_info.append(f"App version: {APP_VERSION}")
@@ -1459,6 +1610,10 @@ class Main(QtWidgets.QWidget):
         #MainView {
             background-color: #f6f8fb;
         }
+        #logWindow {
+            background-color: #eef2f7;
+            background-image: radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.12), transparent 55%);
+        }
         #AppSurface {
             background-color: transparent;
         }
@@ -1653,6 +1808,10 @@ class Main(QtWidgets.QWidget):
         #MainView {
             background-color: #0f172a;
         }
+        #logWindow {
+            background-color: #0b1220;
+            background-image: radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.18), transparent 55%);
+        }
         #AppSurface {
             background-color: transparent;
         }
@@ -1729,13 +1888,6 @@ class Main(QtWidgets.QWidget):
         }
         QComboBox::drop-down {
             border: none;
-        }
-        QComboBox QAbstractItemView {
-            background-color: #1e293b;
-            color: #e2e8f0;
-            border: 1px solid rgba(148, 163, 184, 0.3);
-            selection-background-color: #3b82f6;
-            selection-color: #ffffff;
         }
         QSlider::groove:horizontal {
             height: 6px;
@@ -1891,8 +2043,29 @@ class Main(QtWidgets.QWidget):
         """
         if self.settings.get("dark_mode", False):
             self.setStyleSheet(dark)
+            self._style_combobox_views("#1e293b", "#e2e8f0")
         else:
             self.setStyleSheet(base)
+            self._style_combobox_views("#ffffff", "#1f2933")
+        if hasattr(self, "log_window"):
+            self.log_window.setStyleSheet(self.styleSheet())
+            if self.log_window.isVisible():
+                self._fit_log_window()
+
+    def _style_combobox_views(self, bg_color, text_color):
+        """Style all ComboBox dropdown views to remove white borders."""
+        comboboxes = [
+            self.mode, self.static_color, self.color, self.direction,
+            self.profile_combo, self.ac_profile_combo, self.battery_profile_combo,
+        ]
+        for combo in comboboxes:
+            view = combo.view()
+            if view:
+                view.setFrameShape(QtWidgets.QFrame.NoFrame)
+                view.setStyleSheet(f"background-color: {bg_color}; color: {text_color}; border: none;")
+                parent = view.parentWidget()
+                if parent:
+                    parent.setStyleSheet(f"background-color: {bg_color}; border: 1px solid rgba(148, 163, 184, 0.3);")
 
     def load_profile_into_controls(self, data):
         if not data:

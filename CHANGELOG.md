@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.5.0 – 2026-01-05
+### GUI
+- Cosmetic polish across the main layout and cards.
+- Moved power-based profiles to the left column to optimize space.
+- Activity log now opens in a floating window that auto-sizes.
+- Activity log keeps the last 100 lines in memory and includes them in exports.
+- Power monitor now applies the correct AC/battery profile at startup, not only on transitions.
+
 ## v1.4.0 – 2026-01-04
 ### Installer
 - Resume restore now uses the GUI-managed user service only (system-level hooks are no longer installed).

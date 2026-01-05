@@ -170,6 +170,7 @@ def monitor_loop() -> int:
         log("Unable to determine initial power state.")
     else:
         log(f"Initial power state: {'AC' if last_state else 'battery'}")
+        restore_profile("Initial power state", power_state=last_state)
 
     while True:
         iteration += 1
