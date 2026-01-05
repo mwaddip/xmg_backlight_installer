@@ -12,13 +12,18 @@ from __future__ import annotations
 import argparse
 import filecmp
 import importlib.util
+import json
 import os
+import re
 import shutil
 import signal
 import stat
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
+import urllib.request
 from pathlib import Path
 from typing import Iterable, Tuple
 
@@ -45,9 +50,14 @@ FEDORA_NOTICE = (
     "This installer has been tested on Fedora. Other distributions have not "
     "been validated and may require manual adjustments."
 )
+GITHUB_REPO = "Darayavaush-84/xmg_backlight_installer"
+GITHUB_LATEST_RELEASE_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+UPDATE_CHECK_TIMEOUT_SEC = 10
+UPDATE_SKIP_ENV = "XMG_BACKLIGHT_SKIP_UPDATE"
 LOG_DIR = Path("/var/log/xmg-backlight")
 LOG_FILE_PATH = LOG_DIR / "restore.log"
 INSTALLER_LOG_PATH = LOG_DIR / "installer.log"
+UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-ite8291.rules")
 
 BASE_DIR = Path(__file__).resolve().parent
 SOURCE_DIR = (BASE_DIR / "source").resolve()
@@ -120,6 +130,131 @@ def run(cmd: Iterable[str], check: bool = True) -> Tuple[int, str, str]:
     if check and proc.returncode != 0:
         raise InstallerError(f"Command {' '.join(cmd)} failed with exit code {proc.returncode}")
     return proc.returncode, stdout, stderr
+
+
+def read_local_app_version() -> str | None:
+    version_path = SOURCE_DIR / GUI_SCRIPT_NAME
+    try:
+        content = version_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in content.splitlines():
+        if "APP_VERSION" not in line:
+            continue
+        match = re.search(r"APP_VERSION\s*=\s*[\"']([^\"']+)[\"']", line)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def parse_version(value: str) -> tuple[int, ...]:
+    if not value:
+        return tuple()
+    trimmed = value.strip()
+    if trimmed.lower().startswith("v"):
+        trimmed = trimmed[1:]
+    trimmed = trimmed.split("+", 1)[0].split("-", 1)[0]
+    parts = []
+    for part in trimmed.split("."):
+        match = re.match(r"([0-9]+)", part)
+        if match:
+            parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
+def is_newer_version(candidate: str, current: str) -> bool:
+    candidate_parts = parse_version(candidate)
+    current_parts = parse_version(current)
+    if not candidate_parts or not current_parts:
+        return False
+    max_len = max(len(candidate_parts), len(current_parts))
+    candidate_parts += (0,) * (max_len - len(candidate_parts))
+    current_parts += (0,) * (max_len - len(current_parts))
+    return candidate_parts > current_parts
+
+
+def fetch_latest_release() -> tuple[str, str, str]:
+    request = urllib.request.Request(
+        GITHUB_LATEST_RELEASE_URL,
+        headers={"User-Agent": "xmg-backlight-installer"},
+    )
+    with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SEC) as response:
+        payload = json.load(response)
+    tag = str(payload.get("tag_name") or "").strip()
+    tar_url = str(payload.get("tarball_url") or "").strip()
+    html_url = str(payload.get("html_url") or "").strip()
+    return tag, tar_url, html_url
+
+
+def safe_extract_tar(archive_path: Path, dest_dir: Path) -> None:
+    dest_root = dest_dir.resolve()
+    with tarfile.open(archive_path, "r:gz") as archive:
+        for member in archive.getmembers():
+            member_path = (dest_root / member.name).resolve()
+            if not str(member_path).startswith(str(dest_root) + os.sep):
+                raise InstallerError("Unsafe path detected in release archive.")
+        archive.extractall(dest_root)
+
+
+def find_release_root(dest_dir: Path) -> Path:
+    for entry in dest_dir.iterdir():
+        if entry.is_dir() and (entry / "install.py").is_file():
+            return entry
+    raise InstallerError("Downloaded release archive did not contain install.py.")
+
+
+def check_for_update_and_handoff(original_args: list[str]) -> None:
+    if os.environ.get(UPDATE_SKIP_ENV):
+        log(f"Update check skipped ({UPDATE_SKIP_ENV}=1).")
+        return
+    current_version = read_local_app_version()
+    if not current_version:
+        log("Update check skipped: unable to read local version.")
+        return
+    log(f"Checking for updates (current {current_version})...")
+    try:
+        tag, tar_url, html_url = fetch_latest_release()
+    except Exception as exc:
+        log(f"Update check skipped: {exc}")
+        return
+    if not tag or not tar_url:
+        log("Update check skipped: latest release metadata incomplete.")
+        return
+    if not is_newer_version(tag, current_version):
+        log(f"Installer is up to date (version {current_version}).")
+        return
+    log(f"A newer release is available: {tag} (current {current_version}).")
+    if html_url:
+        log(f"Release page: {html_url}")
+    answer = input("Download and run the updated installer now? [Y/n]: ").strip().lower()
+    if answer not in ("", "y", "yes"):
+        log("Continuing with the current installer.")
+        return
+    try:
+        with tempfile.TemporaryDirectory(prefix="xmg-backlight-install-") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            archive_path = tmp_path / "release.tar.gz"
+            log("Downloading updated installer from GitHub...")
+            request = urllib.request.Request(
+                tar_url,
+                headers={"User-Agent": "xmg-backlight-installer"},
+            )
+            with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SEC) as response:
+                with open(archive_path, "wb") as handle:
+                    shutil.copyfileobj(response, handle)
+            safe_extract_tar(archive_path, tmp_path)
+            release_root = find_release_root(tmp_path)
+            installer_path = release_root / "install.py"
+            log(f"Starting updated installer from {installer_path}")
+            env = dict(os.environ)
+            env[UPDATE_SKIP_ENV] = "1"
+            cmd = [PYTHON_EXECUTABLE, str(installer_path), "--skip-update-check", *original_args]
+            rc = subprocess.call(cmd, env=env)
+            if rc != 0:
+                raise InstallerError(f"Updated installer exited with status {rc}.")
+            sys.exit(0)
+    except InstallerError as exc:
+        log(f"Update failed: {exc}. Continuing with the current installer.")
 
 
 def iter_process_args() -> Iterable[Tuple[int, list[str]]]:
@@ -258,11 +393,27 @@ def detect_driver() -> None:
         DRIVER_INSTALLED_THIS_RUN = True
 
 
-def probe_keyboard_hardware() -> None:
+def extract_device_ids(lines: list[str]) -> list[tuple[str, str]]:
+    ids: list[tuple[str, str]] = []
+    for line in lines:
+        match = re.search(
+            r"product\s+([0-9a-fA-F]{4}).*manufacturer\s+([0-9a-fA-F]{4})",
+            line,
+        )
+        if not match:
+            continue
+        product = match.group(1).lower().zfill(4)
+        vendor = match.group(2).lower().zfill(4)
+        ids.append((vendor, product))
+    deduped = list(dict.fromkeys(ids))
+    return deduped
+
+
+def probe_keyboard_hardware() -> list[tuple[str, str]]:
     cli_path = shutil.which("ite8291r3-ctl")
     if not cli_path:
         log("Hardware probe skipped: ite8291r3-ctl binary not found in PATH.")
-        return
+        return []
     log("Checking for compatible keyboards...")
     rc, stdout, stderr = run([cli_path, "query", "--devices"], check=False)
     if rc != 0:
@@ -272,11 +423,12 @@ def probe_keyboard_hardware() -> None:
         )
         if stderr:
             log(f"ite8291r3-ctl stderr: {stderr}")
-        return
+        return []
     devices = [line.strip() for line in stdout.splitlines() if line.strip()]
+    device_ids = extract_device_ids(devices)
     if devices:
         log(f"Detected {len(devices)} compatible keyboard device(s).")
-        return
+        return device_ids
     answer = input(
         "No supported keyboard was detected. Continue installation anyway? [y/N]: "
     ).strip()
@@ -286,6 +438,66 @@ def probe_keyboard_hardware() -> None:
             run([sys.executable, "-m", "pip", "uninstall", "-y", DRIVER_PACKAGE], check=False)
         raise InstallerError("Installation aborted: no compatible keyboard detected.")
     log("User opted to continue without a detected keyboard.")
+    return []
+
+
+def ensure_udev_rule(device_ids: list[tuple[str, str]]) -> None:
+    if not device_ids:
+        log("Skipping udev rule setup: no device IDs detected.")
+        return
+    vendor, product = device_ids[0]
+    if len(device_ids) > 1:
+        log(
+            "Multiple keyboard devices detected; using the first one "
+            f"({vendor}:{product}) for the udev rule."
+        )
+    log(f"Detected keyboard device ID for udev: vendor={vendor} product={product}")
+
+    existing_text = ""
+    if UDEV_RULE_PATH.exists():
+        try:
+            existing_text = UDEV_RULE_PATH.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            log(f"Unable to read {UDEV_RULE_PATH}: {exc}")
+            return
+        if (
+            f'ATTRS{{idVendor}}=="{vendor}"' in existing_text
+            and f'ATTRS{{idProduct}}=="{product}"' in existing_text
+        ):
+            log(f"Udev rule already present for {vendor}:{product}.")
+            return
+        answer = input(
+            f"A udev rule file already exists at {UDEV_RULE_PATH}. Append a new rule? [Y/n]: "
+        ).strip().lower()
+        if answer not in ("", "y", "yes"):
+            log("Skipping udev rule creation.")
+            return
+
+    rule_line = (
+        'SUBSYSTEMS=="usb", '
+        f'ATTRS{{idVendor}}=="{vendor}", '
+        f'ATTRS{{idProduct}}=="{product}", '
+        'MODE:="0666"'
+    )
+
+    try:
+        UDEV_RULE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        mode = "a" if existing_text else "w"
+        with open(UDEV_RULE_PATH, mode, encoding="utf-8") as handle:
+            if existing_text and not existing_text.endswith("\n"):
+                handle.write("\n")
+            if not existing_text:
+                handle.write("# Allow non-root access to ITE 8291 keyboards\n")
+            handle.write(rule_line)
+            handle.write("\n")
+        os.chmod(UDEV_RULE_PATH, 0o644)
+    except OSError as exc:
+        log(f"Failed to write udev rule: {exc}")
+        return
+
+    run(["udevadm", "control", "--reload"], check=False)
+    run(["udevadm", "trigger"], check=False)
+    log("Udev rule installed. You may need to unplug/replug or reboot.")
 
 
 def detect_gui_installation() -> None:
@@ -596,10 +808,18 @@ def main() -> None:
         action="store_true",
         help="Used with --uninstall: also remove user profiles and settings.",
     )
+    parser.add_argument(
+        "--skip-update-check",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
+    original_args = [arg for arg in sys.argv[1:] if arg != "--skip-update-check"]
 
     log(FEDORA_NOTICE)
     require_root()
+    if not args.uninstall and not args.skip_update_check:
+        check_for_update_and_handoff(original_args)
     stop_running_gui_processes()
 
     if args.uninstall:
@@ -624,7 +844,8 @@ def main() -> None:
         return
 
     detect_driver()
-    probe_keyboard_hardware()
+    device_ids = probe_keyboard_hardware()
+    ensure_udev_rule(device_ids)
     ensure_runtime_dependency()
     detect_gui_installation()
     deploy_files()

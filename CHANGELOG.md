@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6.0 – 2026-01-06
+### Installer
+- Added a pre-install update check that detects newer GitHub releases and can download and run the updated installer.
+- Added automatic udev rule setup to grant non-root access to the keyboard device.
+
 ## v1.5.0 – 2026-01-05
 ### GUI
 - Cosmetic polish across the main layout and cards.
