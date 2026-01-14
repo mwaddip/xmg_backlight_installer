@@ -58,7 +58,7 @@ EFFECTS = [
     "breathing", "wave", "random", "rainbow",
     "ripple", "marquee", "raindrop", "aurora", "fireworks",
 ]
-COLORS = ["white", "red", "orange", "yellow", "green", "blue", "teal", "purple", "random"]
+COLORS = ["white", "red", "orange", "yellow", "green", "blue", "teal", "purple", "random", "custom"]
 DIRECTIONS = ["none", "right", "left", "up", "down"]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -88,6 +88,7 @@ DEFAULT_PROFILE_STATE = {
     "brightness": 40,
     "mode": "static",
     "static_color": "white",
+    "custom_hex": "#FFFFFF",
     "speed": 5,
     "color": "none",
     "direction": "none",
@@ -335,6 +336,7 @@ def sanitize_profile_state(data):
     base["static_color"] = sanitize_choice(
         data.get("static_color"), COLORS, base["static_color"]
     )
+    base["custom_hex"] = data.get("custom_hex", base.get("custom_hex", "#FFFFFF"))
     base["speed"] = clamp_int(data.get("speed"), 0, 10, base["speed"])
     color_value = data.get("color") or "none"
     if color_value != "none" and color_value not in COLORS:
@@ -913,6 +915,14 @@ class Main(QtWidgets.QWidget):
             self.static_color.addItem(self.tr(f"color.{color}"), color)
         set_combo_by_data(self.static_color, self.last_static_color)
         mode_row.addWidget(self.static_color, 1)
+
+        self.custom_color_button = QtWidgets.QPushButton("Pick Color")
+        self.custom_color_button.setMaximumWidth(100)
+        self.custom_color_button.clicked.connect(self.on_color_picker_clicked)
+        mode_row.addWidget(self.custom_color_button)
+        self.custom_color_button.setVisible(False)
+        self.custom_hex_value = "#FFFFFF"
+
         mode_layout.addLayout(mode_row)
 
         self.effect_panel = QtWidgets.QWidget()
@@ -1216,7 +1226,7 @@ class Main(QtWidgets.QWidget):
 
         self.mode.currentIndexChanged.connect(self.on_mode_changed)
 
-        self.static_color.currentIndexChanged.connect(self.schedule_apply)
+        self.static_color.currentIndexChanged.connect(self.on_static_color_changed)
 
         self.speed.valueChanged.connect(self.schedule_apply)
         self.color.currentIndexChanged.connect(self.schedule_apply)
@@ -2532,6 +2542,14 @@ class Main(QtWidgets.QWidget):
                 set_combo_by_data(self.static_color, self.last_static_color)
             self.last_static_color = static_value
 
+            custom_hex_value = data.get("custom_hex", "#FFFFFF")
+            self.custom_hex_value = custom_hex_value
+
+            is_custom = static_value == "custom"
+            self.custom_color_button.setVisible(is_custom)
+            if is_custom:
+                self.custom_color_button.setStyleSheet(f"background-color: {custom_hex_value};")
+
             self.speed.setValue(clamp_int(data.get("speed"), 0, 10, self.speed.value()))
 
             color_value = data.get("color") or "none"
@@ -2661,6 +2679,7 @@ class Main(QtWidgets.QWidget):
             "brightness": int(self.b_spin.value()),
             "mode": mode_value,
             "static_color": static_value,
+            "custom_hex": self.custom_hex_value,
             "speed": clamp_int(self.speed.value(), 0, 10, 5),
             "color": color_value,
             "direction": direction_value,
@@ -3134,6 +3153,19 @@ class Main(QtWidgets.QWidget):
         self.update_panels()
         self.schedule_apply()
 
+    def on_static_color_changed(self):
+        is_custom = self.static_color.currentData() == "custom"
+        self.custom_color_button.setVisible(is_custom)
+        self.schedule_apply()
+
+    def on_color_picker_clicked(self):
+        current_color = QtGui.QColor(self.custom_hex_value)
+        color = QtWidgets.QColorDialog.getColor(current_color, self, "Pick Custom Color")
+        if color.isValid():
+            self.custom_hex_value = color.name().upper()
+            self.custom_color_button.setStyleSheet(f"background-color: {self.custom_hex_value};")
+            self.schedule_apply()
+
     def on_brightness_changed(self, v):
         if self._suppress:
             return
@@ -3208,9 +3240,33 @@ class Main(QtWidgets.QWidget):
         color_value = self.static_color.currentData() or self.static_color.currentText()
         display_color = self.static_color.currentText()
         self.last_static_color = color_value
-        rc, out, err = self.hard_reset_then(
-            ["monocolor", "-b", str(v), "--name", color_value]
-        )
+
+        if color_value == "custom":
+            hex_color = self.custom_hex_value.strip()
+            if not hex_color:
+                hex_color = "#FFFFFF"
+            if hex_color.startswith("#"):
+                hex_color = hex_color[1:]
+            if len(hex_color) == 6:
+                try:
+                    r = int(hex_color[0:2], 16)
+                    g = int(hex_color[2:4], 16)
+                    b = int(hex_color[4:6], 16)
+                    rc, out, err = self.hard_reset_then(
+                        ["monocolor", "-b", str(v), "--rgb", f"{r},{g},{b}"]
+                    )
+                    display_color = f"#{hex_color.upper()}"
+                except ValueError:
+                    self.set_status("Invalid hex color format", level="error")
+                    return
+            else:
+                self.set_status("Hex color must be 6 characters", level="error")
+                return
+        else:
+            rc, out, err = self.hard_reset_then(
+                ["monocolor", "-b", str(v), "--name", color_value]
+            )
+
         if rc == 0:
             self.set_status(
                 self.tr(

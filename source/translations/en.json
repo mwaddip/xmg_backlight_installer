@@ -139,6 +139,7 @@
   "color.teal": "Teal",
   "color.purple": "Purple",
   "color.random": "Random",
+  "color.custom": "Custom",
   "direction.none": "None",
   "direction.right": "Right",
   "direction.left": "Left",
